@@ -2693,6 +2693,89 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_improved_with_reorder() -> Result<()> {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("a", DataType::Int32, true),
+            Field::new("b", DataType::Int32, true),
+            Field::new("c", DataType::Int32, true),
+        ]));
+
+        let col_a = col("a", &schema)?;
+        let col_b = col("b", &schema)?;
+        let col_c = col("c", &schema)?;
+
+        let asc = SortOptions::default();
+        let desc = SortOptions {
+            descending: true,
+            nulls_first: true,
+        };
+
+        // Test case 1: Sustaining existing postfix
+        {
+            let mut eq_props = EquivalenceProperties::new(Arc::clone(&schema));
+            eq_props.add_new_orderings(vec![vec![
+                PhysicalSortExpr::new(Arc::clone(&col_a), asc),
+                PhysicalSortExpr::new(Arc::clone(&col_b), desc),
+            ]]);
+
+            let new_order = vec![PhysicalSortExpr::new(Arc::clone(&col_a), asc)];
+            let result = eq_props.with_reorder(new_order);
+
+            assert_eq!(result.oeq_class().orderings.len(), 1);
+            assert_eq!(
+                result.oeq_class().orderings[0],
+                vec![
+                    PhysicalSortExpr::new(Arc::clone(&col_a), asc),
+                    PhysicalSortExpr::new(Arc::clone(&col_b), desc),
+                ]
+            );
+        }
+
+        // Test case 2: Equivalent columns
+        {
+            let mut eq_props = EquivalenceProperties::new(Arc::clone(&schema));
+            eq_props.add_equal_conditions(&col_a, &col_b)?;
+            eq_props.add_new_orderings(vec![vec![
+                PhysicalSortExpr::new(Arc::clone(&col_a), asc),
+                PhysicalSortExpr::new(Arc::clone(&col_c), desc),
+            ]]);
+
+            let new_order = vec![PhysicalSortExpr::new(Arc::clone(&col_b), asc)];
+            let result = eq_props.with_reorder(new_order);
+
+            assert_eq!(result.oeq_class().orderings.len(), 1);
+            assert_eq!(
+                result.oeq_class().orderings[0],
+                vec![
+                    PhysicalSortExpr::new(Arc::clone(&col_b), asc),
+                    PhysicalSortExpr::new(Arc::clone(&col_c), desc),
+                ]
+            );
+        }
+
+        // Test case 3: Constant columns
+        {
+            let mut eq_props = EquivalenceProperties::new(Arc::clone(&schema));
+            eq_props = eq_props.add_constants(vec![ConstExpr::new(Arc::clone(&col_a))]);
+            eq_props.add_new_orderings(vec![vec![PhysicalSortExpr::new(
+                Arc::clone(&col_c),
+                desc,
+            )]]);
+
+            let new_order = vec![PhysicalSortExpr::new(Arc::clone(&col_a), asc)];
+            let result = eq_props.with_reorder(new_order);
+
+            assert_eq!(result.oeq_class().orderings.len(), 1);
+            assert_eq!(
+                result.oeq_class().orderings[0],
+                vec![PhysicalSortExpr::new(Arc::clone(&col_c), desc)]
+            );
+        }
+
+        Ok(())
+    }
+
     /// Return a new schema with the same types, but new field names
     ///
     /// The new field names are the old field names with `text` appended.
