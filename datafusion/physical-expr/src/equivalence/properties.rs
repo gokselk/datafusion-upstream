@@ -383,9 +383,36 @@ impl EquivalenceProperties {
     /// is re-sorted according to the argument `sort_exprs`. Note that constants
     /// and equivalence classes are unchanged as they are unaffected by a re-sort.
     pub fn with_reorder(mut self, sort_exprs: Vec<PhysicalSortExpr>) -> Self {
-        // TODO: In some cases, existing ordering equivalences may still be valid add this analysis.
-        self.oeq_class = OrderingEquivalenceClass::new(vec![sort_exprs]);
+        let filtered_sort_exprs: Vec<PhysicalSortExpr> = sort_exprs
+            .into_iter()
+            .filter(|expr| !self.is_expr_constant(&expr.expr))
+            .collect();
+    
+        let mut updated_orderings = vec![filtered_sort_exprs.clone()];
+    
+        for existing_order in &self.oeq_class.orderings {
+            let extended_order = self.extend_new_order_with_existing_suffix(existing_order, &filtered_sort_exprs);
+            if extended_order.len() > filtered_sort_exprs.len() {
+                updated_orderings.push(extended_order);
+            }
+        }
+    
+        self.oeq_class = OrderingEquivalenceClass::new(updated_orderings);
         self
+    }
+    
+    fn extend_new_order_with_existing_suffix(&self, existing_order: &[PhysicalSortExpr], new_order: &[PhysicalSortExpr]) -> Vec<PhysicalSortExpr> {
+        let matching_prefix = existing_order.iter()
+            .zip(new_order)
+            .take_while(|(existing, new)| self.eq_group.exprs_equal(&new.expr, &existing.expr))
+            .map(|(_, new)| new.clone())
+            .collect::<Vec<_>>();
+    
+        if matching_prefix.len() == new_order.len() {
+            [&matching_prefix[..], &existing_order[matching_prefix.len()..]].concat()
+        } else {
+            vec![]
+        }
     }
 
     /// Normalizes the given sort expressions (i.e. `sort_exprs`) using the

@@ -594,6 +594,10 @@ impl EquivalenceGroup {
             JoinType::RightSemi | JoinType::RightAnti => right_equivalences.clone(),
         }
     }
+
+    pub fn exprs_equal(&self, expr1: &Arc<dyn PhysicalExpr>, expr2: &Arc<dyn PhysicalExpr>) -> bool {
+        expr1.eq(expr2) || self.classes.iter().any(|class| class.contains(expr1) && class.contains(expr2))
+    }
 }
 
 impl Display for EquivalenceGroup {
