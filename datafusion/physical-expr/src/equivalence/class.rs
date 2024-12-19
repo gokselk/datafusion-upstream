@@ -29,6 +29,29 @@ use datafusion_physical_expr_common::physical_expr::format_physical_expr_list;
 
 use indexmap::{IndexMap, IndexSet};
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConstValue {
+    /// The same value across all partitions
+    Uniform(Option<ScalarValue>),
+    /// Different values for different partitions
+    Heterogeneous(Vec<Option<ScalarValue>>)
+}
+
+impl Display for ConstValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            ConstValue::Uniform(value) => write!(f, "{}", value.as_ref().map_or("NULL".to_string(), |v| v.to_string())),
+            ConstValue::Heterogeneous(values) => {
+                let formatted: Vec<_> = values
+                    .iter()
+                    .map(|v| v.as_ref().map_or("NULL".to_string(), |val| val.to_string()))
+                    .collect();
+                write!(f, "({})", formatted.join(", "))
+            }
+        }
+    }
+}
+
 /// A structure representing a expression known to be constant in a physical execution plan.
 ///
 /// The `ConstExpr` struct encapsulates an expression that is constant during the execution
@@ -59,17 +82,13 @@ use indexmap::{IndexMap, IndexSet};
 pub struct ConstExpr {
     /// The  expression that is known to be constant (e.g. a `Column`)
     expr: Arc<dyn PhysicalExpr>,
-    /// Does the constant have the same value across all partitions? See
-    /// struct docs for more details
-    across_partitions: bool,
-    /// The value of the constant expression
-    value: Option<ScalarValue>,
+    /// The value(s) of the constant expression
+    value: ConstValue,
 }
 
 impl PartialEq for ConstExpr {
     fn eq(&self, other: &Self) -> bool {
-        self.across_partitions == other.across_partitions
-            && self.expr.eq(&other.expr)
+        self.expr.eq(&other.expr)
             && self.value == other.value
     }
 }
@@ -82,22 +101,12 @@ impl ConstExpr {
     pub fn new(expr: Arc<dyn PhysicalExpr>) -> Self {
         Self {
             expr,
-            // By default, assume constant expressions are not same across partitions.
-            across_partitions: false,
-            value: None,
+            value: ConstValue::Uniform(None),
         }
     }
 
-    pub fn with_value(mut self, value: ScalarValue) -> Self {
-        self.value = Some(value);
-        self
-    }
-
-    /// Set the `across_partitions` flag
-    ///
-    /// See struct docs for more details
-    pub fn with_across_partitions(mut self, across_partitions: bool) -> Self {
-        self.across_partitions = across_partitions;
+    pub fn with_value(mut self, value: ConstValue) -> Self {
+        self.value = value;
         self
     }
 
@@ -105,7 +114,7 @@ impl ConstExpr {
     ///
     /// See struct docs for more details
     pub fn across_partitions(&self) -> bool {
-        self.across_partitions
+        matches!(self.value, ConstValue::Uniform(_))
     }
 
     pub fn expr(&self) -> &Arc<dyn PhysicalExpr> {
@@ -116,8 +125,8 @@ impl ConstExpr {
         self.expr
     }
 
-    pub fn value(&self) -> Option<&ScalarValue> {
-        self.value.as_ref()
+    pub fn value(&self) -> &ConstValue {
+        &self.value
     }
 
     pub fn map<F>(&self, f: F) -> Option<Self>
@@ -127,7 +136,6 @@ impl ConstExpr {
         let maybe_expr = f(&self.expr);
         maybe_expr.map(|expr| Self {
             expr,
-            across_partitions: self.across_partitions,
             value: self.value.clone(),
         })
     }
@@ -164,12 +172,7 @@ impl ConstExpr {
 impl Display for ConstExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.expr)?;
-        if self.across_partitions {
-            write!(f, "(across_partitions)")?;
-        }
-        if let Some(value) = self.value.as_ref() {
-            write!(f, "({})", value)?;
-        }
+        write!(f, "({})", self.value)?;
         Ok(())
     }
 }

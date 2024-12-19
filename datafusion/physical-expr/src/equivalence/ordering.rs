@@ -253,6 +253,7 @@ impl Display for OrderingEquivalenceClass {
 mod tests {
     use std::sync::Arc;
 
+    use crate::equivalence::class::ConstValue;
     use crate::equivalence::tests::{
         convert_to_orderings, convert_to_sort_exprs, create_test_schema,
     };
@@ -585,7 +586,7 @@ mod tests {
 
             let constants = constants
                 .into_iter()
-                .map(|expr| ConstExpr::from(expr).with_across_partitions(true));
+                .map(|expr| ConstExpr::from(expr).with_value(ConstValue::Uniform(None)));
             eq_properties = eq_properties.with_constants(constants);
 
             let reqs = convert_to_sort_exprs(&reqs);
